@@ -4,6 +4,7 @@ package network
 // 3 different roles: miner- running the proof of work algorithm to run and maintain the network
 // full nodes:take validated blocks from miners and verify transaction, they have an entire copy of the blockchain, run operationas and help nodes discover one and another
 //SPV: simplified payment verification nodes are wallet nodes use merkle tree and feed off full nodes and manage transactions
+
 import (
 	"bytes"
 	"encoding/gob"
@@ -17,9 +18,8 @@ import (
 	"runtime"
 	"syscall"
 
-	"gopkg.in/vrecan/death.v3"
-
 	"github.com/tensor-programming/golang-blockchain/blockchain"
+	"gopkg.in/vrecan/death.v3"
 )
 
 // protocol used it TCP
