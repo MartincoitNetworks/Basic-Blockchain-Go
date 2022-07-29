@@ -47,17 +47,21 @@ func ContinueBlockChain(nodeId string) *BlockChain {
 
 	var lastHash []byte
 
-	opts := badger.DefaultOptions
-	opts.Dir = path
-	opts.ValueDir = path
+	/* opts := badger.DefaultOptions
+	 opts.Dir = path
+	opts.ValueDir = path  */
 
-	db, err := openDB(path, opts)
+	db, err := badger.Open(badger.DefaultOptions(path))
 	Handle(err)
 	//get lasthash from database
 	err = db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte("lh"))
 		Handle(err)
-		lastHash, err = item.Value()
+
+		err = item.Value(func(val []byte) error {
+			lastHash = val
+			return nil
+		})
 
 		return err
 	})
@@ -77,11 +81,13 @@ func InitBlockChain(address, nodeId string) *BlockChain {
 		runtime.Goexit()
 	}
 	var lastHash []byte
-	opts := badger.DefaultOptions
+	/* opts := badger.DefaultOptions
 	opts.Dir = path
-	opts.ValueDir = path
+	opts.ValueDir = path */
+	db, err := badger.Open(badger.DefaultOptions(path))
 	//open up the database
-	db, err := openDB(path, opts)
+
+	/* db, err := openDB(path, opts) */
 	Handle(err)
 
 	//update function: read and write transactions in our DB
@@ -113,18 +119,25 @@ func (chain *BlockChain) AddBlock(block *Block) {
 		if _, err := txn.Get(block.Hash); err == nil {
 			return nil
 		}
-
+		var lastHash []byte
+		var lastBlockData []byte
 		blockData := block.Serialize()
 		err := txn.Set(block.Hash, blockData)
 		Handle(err)
 
 		item, err := txn.Get([]byte("lh"))
 		Handle(err)
-		lastHash, _ := item.Value()
+		err = item.Value(func(val []byte) error {
+			lastHash = val
+			return nil
+		})
 
 		item, err = txn.Get(lastHash)
 		Handle(err)
-		lastBlockData, _ := item.Value()
+		err = item.Value(func(val []byte) error {
+			lastBlockData = val
+			return nil
+		})
 
 		lastBlock := Deserialize(lastBlockData)
 
@@ -141,15 +154,23 @@ func (chain *BlockChain) AddBlock(block *Block) {
 
 func (chain *BlockChain) GetBestHeight() int {
 	var lastBlock Block
+	var lastHash []byte
+	var lastBlockData []byte
 	//view function to only view trnsactions
 	err := chain.Database.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte("lh"))
 		Handle(err)
-		lastHash, _ := item.Value()
+		err = item.Value(func(val []byte) error {
+			lastHash = val
+			return nil
+		})
 
 		item, err = txn.Get(lastHash)
 		Handle(err)
-		lastBlockData, _ := item.Value()
+		err = item.Value(func(val []byte) error {
+			lastBlockData = val
+			return nil
+		})
 
 		lastBlock = *Deserialize(lastBlockData)
 
@@ -162,12 +183,16 @@ func (chain *BlockChain) GetBestHeight() int {
 
 func (chain *BlockChain) GetBlock(blockHash []byte) (Block, error) {
 	var block Block
+	var blockData []byte
 	//view function to only view trnsactions
 	err := chain.Database.View(func(txn *badger.Txn) error {
 		if item, err := txn.Get(blockHash); err != nil {
 			return errors.New("Block is not found")
 		} else {
-			blockData, _ := item.Value()
+			err = item.Value(func(val []byte) error {
+				blockData = val
+				return nil
+			})
 
 			block = *Deserialize(blockData)
 		}
@@ -200,6 +225,7 @@ func (chain *BlockChain) GetBlockHashes() [][]byte {
 
 func (chain *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
+	var lastBlockData []byte
 	var lastHeight int
 
 	for _, tx := range transactions {
@@ -211,11 +237,17 @@ func (chain *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	err := chain.Database.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte("lh"))
 		Handle(err)
-		lastHash, err = item.Value()
+		err = item.Value(func(val []byte) error {
+			lastHash = val
+			return nil
+		})
 
 		item, err = txn.Get(lastHash)
 		Handle(err)
-		lastBlockData, _ := item.Value()
+		err = item.Value(func(val []byte) error {
+			lastBlockData = val
+			return nil
+		})
 
 		lastBlock := Deserialize(lastBlockData)
 
