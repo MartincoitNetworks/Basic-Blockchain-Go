@@ -18,11 +18,15 @@ func (chain *BlockChain) Iterator() *BlockChainIterator {
 //Iterate through our blockchain from last added to genesis block
 func (iter *BlockChainIterator) Next() *Block {
 	var block *Block
+	var encodedBlock []byte
 
 	err := iter.Database.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(iter.CurrentHash)
 		Handle(err)
-		encodedBlock, err := item.Value()
+		err = item.Value(func(val []byte) error {
+			encodedBlock = val
+			return nil
+		})
 		block = Deserialize(encodedBlock)
 
 		return err
