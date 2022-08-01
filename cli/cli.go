@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -48,7 +49,10 @@ func (cli *CommandLine) StartNode(nodeID, minerAddress string) {
 			log.Panic("Wrong miner address!")
 		}
 	}
-	network.StartServer(nodeID, minerAddress)
+	// var listen pan.IPPortValue
+	// net.ResolveIPAddr("udp", "localhost:0")
+	addr, _ := net.ResolveUDPAddr("udp", "localhost:0")
+	network.StartServer(nodeID, minerAddress, addr)
 }
 
 func (cli *CommandLine) reindexUTXO(nodeID string) {
