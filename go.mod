@@ -4,6 +4,7 @@ require (
 	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575 // indirect
 	github.com/d4l3k/messagediff v1.2.1 // indirect
 	github.com/dgraph-io/badger v1.6.2
+	github.com/lucas-clemente/quic-go v0.23.0 // indirect
 	github.com/mr-tron/base58 v1.1.1
 	github.com/netsec-ethz/scion-apps v0.5.0
 	github.com/smartystreets/goconvey v1.7.2 // indirect
