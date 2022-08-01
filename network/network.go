@@ -2,13 +2,16 @@ package network
 
 // netwok.go is the file to make the block chain a peer to peer network
 // 3 different roles: miner- running the proof of work algorithm to run and maintain the network
-// full nodes:take validated blocks from miners and verify transaction, they have an entire copy of the blockchain, run operationas and help nodes discover one and another
+// full nodes:take validated blocks from miners and verify transaction, they have an entire copy of the blockchain, run operations and help nodes discover one and another
 //SPV: simplified payment verification nodes are wallet nodes use merkle tree and feed off full nodes and manage transactions
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/gob"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,14 +20,19 @@ import (
 	"os"
 	"runtime"
 	"syscall"
+	"time"
 
+	"github.com/lucas-clemente/quic-go"
+	"github.com/netsec-ethz/scion-apps/pkg/pan"
+	"github.com/netsec-ethz/scion-apps/pkg/quicutil"
 	"github.com/tensor-programming/golang-blockchain/blockchain"
 	"gopkg.in/vrecan/death.v3"
+	"inet.af/netaddr"
 )
 
 // protocol used it TCP
 const (
-	protocol      = "tcp"
+	// protocol      = "tcp"
 	version       = 1
 	commandLength = 12
 )
@@ -79,8 +87,9 @@ type Version struct {
 	AddrFrom   string
 }
 
-// central node:3000 is a node
+//RPC the version is important
 
+// central node:1000 is a node
 //create blockchain with central node
 //wallet connects and downloads bloackchain
 //miner connects and downloads blockchain
@@ -134,7 +143,7 @@ func SendAddr(address string) {
 	SendData(address, request)
 }
 
-//send address from one peer to the other
+//send block from one peer to the other
 func SendBlock(addr string, b *blockchain.Block) {
 	data := Block{nodeAddress, b.Serialize()}
 	payload := GobEncode(data)
@@ -144,11 +153,42 @@ func SendBlock(addr string, b *blockchain.Block) {
 }
 
 // send data from one node to another
-//Here we are using the TCP protocol
+//Here we are using the UDP protocol
 func SendData(addr string, data []byte) {
-	conn, err := net.Dial(protocol, addr)
 
+	//conn, err := net.Dial(protocol, addr)
+
+	address, err := pan.ResolveUDPAddr(addr)
+	//conn, err := pan.DialUDP(context.Background(), netaddr.IPPort{}, address, nil, nil)
 	//if the node does not exist then update and append the node
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"hello-quic"},
+	}
+	// Set Pinging Selector with active probing on two paths
+	selector := &pan.PingingSelector{
+		Interval: 2 * time.Second,
+		Timeout:  time.Second,
+	}
+	selector.SetActive(2)
+	conn, err := pan.DialQUIC(context.Background(), netaddr.IPPort{}, address, nil, selector, "", tlsCfg, nil)
+	/* if err != nil {
+		fmt.Printf("%s is not available\n", addr)
+		var updatedNodes []string
+
+		for _, node := range KnownNodes {
+			if node != addr {
+				updatedNodes = append(updatedNodes, node)
+			}
+		}
+		KnownNodes = updatedNodes
+
+	} */
+	//if we do connect we defer closing the connection
+	//defer conn.Close()
+
+	// call the connection and copy the data
+	//_, err = io.Copy(conn, bytes.NewReader(data))
 	if err != nil {
 		fmt.Printf("%s is not available\n", addr)
 		var updatedNodes []string
@@ -163,14 +203,14 @@ func SendData(addr string, data []byte) {
 
 		return
 	}
-	//if we do connect we defer closing the connection
-	defer conn.Close()
+	defer conn.Conn.Close()
 
 	// call the connection and copy the data
-	_, err = io.Copy(conn, bytes.NewReader(data))
+	_, err = io.Copy(conn.Conn, bytes.NewReader(data))
 	if err != nil {
 		log.Panic(err)
 	}
+
 }
 
 //send inventory
@@ -178,7 +218,6 @@ func SendInv(address, kind string, items [][]byte) {
 	inventory := Inv{nodeAddress, kind, items}
 	payload := GobEncode(inventory)
 	request := append(CmdToBytes("inv"), payload...)
-
 	SendData(address, request)
 }
 
@@ -444,8 +483,7 @@ func HandleVersion(request []byte, chain *blockchain.BlockChain) {
 }
 
 //takes in a net connection and blockchain
-
-func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
+func HandleConnection(conn pan.Conn, chain *blockchain.BlockChain) {
 	//ioutil to read the connection
 	req, err := ioutil.ReadAll(conn)
 	defer conn.Close()
@@ -479,12 +517,18 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
 }
 
 //runs when we start the node
-func StartServer(nodeID, minerAddress string) {
+func StartServer(nodeID, minerAddress string, listen *net.UDPAddr) {
+	tlsCfg := &tls.Config{
+		Certificates: quicutil.MustGenerateSelfSignedCert(),
+		NextProtos:   []string{"hello-quic"},
+	}
 	nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
 	mineAddress = minerAddress
 
-	// to check if we are listening on the right network
-	ln, err := net.Listen(protocol, nodeAddress)
+	//if we are listening on the right port
+	local, _ := netaddr.FromStdAddr(listen.IP, listen.Port, listen.Zone)
+	ln, err := pan.ListenQUIC(context.Background(), local, nil, tlsCfg, nil)
+	//ln, err := net.Listen(protocol, nodeAddress)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -497,13 +541,63 @@ func StartServer(nodeID, minerAddress string) {
 	if nodeAddress != KnownNodes[0] {
 		SendVersion(KnownNodes[0], chain)
 	}
-	for {
-		conn, err := ln.Accept()
+
+	/* for {
+		ln, err := ln.Accept(context.Background())
 		if err != nil {
 			log.Panic(err)
 		}
-		go HandleConnection(conn, chain)
+		fmt.Println("New session", ln.RemoteAddr())
+		go func(){
+			err := workSession(ln)
+			var errApplication *quic.ApplicationError
+			if err != nil && !(errors.As(err, &errApplication) && errApplication.ErrorCode == 0) {
+				fmt.Println("Error in session", ln.RemoteAddr(), err)
+			}
+		}()
+	} */
 
+	// buffer := make([]byte, 16*1024)
+	//iterate through all messages we get from our listener
+	for {
+		ln, err := ln.Accept(context.Background())
+		if err != nil {
+			log.Panic(err)
+		}
+		fmt.Println("New session", ln.RemoteAddr())
+		go func() {
+			err := workSession(ln)
+			var errApplication *quic.ApplicationError
+			if err != nil && !(errors.As(err, &errApplication) && errApplication.ErrorCode == 0) {
+				fmt.Println("Error in session", ln.RemoteAddr(), err)
+			}
+		}()
+
+	}
+
+}
+
+func workSession(session quic.Session) error {
+	for {
+		stream, err := session.AcceptStream(context.Background())
+		if err != nil {
+			return err
+		}
+		defer stream.Close()
+		data, err := ioutil.ReadAll(stream)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", data)
+		_, err = stream.Write([]byte("gotcha: "))
+		if err != nil {
+			return err
+		}
+		_, err = stream.Write(data)
+		if err != nil {
+			return err
+		}
+		stream.Close()
 	}
 }
 
