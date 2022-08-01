@@ -22,7 +22,7 @@ func (u UTXOSet) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[s
 	unspentOuts := make(map[string][]int)
 	accumulated := 0
 	db := u.Blockchain.Database
-
+	var v []byte
 	err := db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 
@@ -32,7 +32,10 @@ func (u UTXOSet) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[s
 		for it.Seek(utxoPrefix); it.ValidForPrefix(utxoPrefix); it.Next() {
 			item := it.Item()
 			k := item.Key()
-			v, err := item.Value()
+			err := item.Value(func(val []byte) error {
+				v = val
+				return nil
+			})
 			Handle(err)
 			k = bytes.TrimPrefix(k, utxoPrefix)
 			txID := hex.EncodeToString(k)
@@ -57,7 +60,7 @@ func (u UTXOSet) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[s
 //then the tokens still exist for a user
 func (u UTXOSet) FindUnspentTransactions(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
-
+	var v []byte
 	db := u.Blockchain.Database
 
 	err := db.View(func(txn *badger.Txn) error {
@@ -68,7 +71,10 @@ func (u UTXOSet) FindUnspentTransactions(pubKeyHash []byte) []TxOutput {
 
 		for it.Seek(utxoPrefix); it.ValidForPrefix(utxoPrefix); it.Next() {
 			item := it.Item()
-			v, err := item.Value()
+			err := item.Value(func(val []byte) error {
+				v = val
+				return nil
+			})
 			Handle(err)
 			outs := DeserializeOutputs(v)
 			for _, out := range outs.Outputs {
@@ -130,7 +136,7 @@ func (u UTXOSet) Reindex() {
 
 func (u *UTXOSet) Update(block *Block) {
 	db := u.Blockchain.Database
-
+	var v []byte
 	err := db.Update(func(txn *badger.Txn) error {
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
@@ -139,7 +145,10 @@ func (u *UTXOSet) Update(block *Block) {
 					inID := append(utxoPrefix, in.ID...)
 					item, err := txn.Get(inID)
 					Handle(err)
-					v, err := item.Value()
+					err = item.Value(func(val []byte) error {
+						v = val
+						return nil
+					})
 					Handle(err)
 
 					outs := DeserializeOutputs(v)
